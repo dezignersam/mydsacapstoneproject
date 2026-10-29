@@ -36,7 +36,15 @@
 
 ### S04: As an organizer, I want to publish and unpublish an event, so that I control when it goes public
 
-*Written by you, in pairs, during the Build 2 class. Add your three criteria here before you paste the AI prompt below.*
+- **Given** an event is a draft and has at least one ticket tier
+  **When** the organizer publishes it
+  **Then** it appears in the public event list.
+- **Given** an event is published
+  **When** the organizer unpublishes it
+  **Then** it disappears from the public list but remains saved as a draft.
+- **Given** an event has no ticket tiers
+  **When** the organizer tries to publish it
+  **Then** the request is rejected with `INVALID_STATE`.
 
 ### S05: As an attendee, I want to search, filter and sort published events, so that I can find one I like
 
@@ -138,3 +146,4 @@ and any rule from this prompt that you were unsure about.
 The Definition of done in [user-stories.md](user-stories.md) applies to every story in this build.
 
 [All milestones](milestones.md) · [Build 1](build-1.md) · [Build 3](build-3.md)
+ 

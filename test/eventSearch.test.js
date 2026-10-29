@@ -47,6 +47,28 @@ describe('event search', () => {
     assert.ok(!titles(summaries).includes('Secret Draft'));
   });
 
+  it('creates a draft with a new id and does not save invalid events', () => {
+    const store = createStore();
+    const details = { title: 'New Event', city: 'Lagos', startsAt: '2026-12-05T17:00:00Z' };
+    const event = createEvent(store, details);
+    assert.ok(event.id);
+    assert.notEqual(event.id, createEvent(store, { ...details, title: 'Another Event' }).id);
+    assert.equal(listEventSummaries(store).length, 0);
+    assert.throws(
+      () => createEvent(store, { ...details, city: ' ' }),
+      (error) => error instanceof DomainError && error.code === 'VALIDATION',
+    );
+    assert.equal(store.events.size, 2);
+  });
+
+  it('returns a new empty result for an empty list', () => {
+    const empty = [];
+    const filtered = filterEvents(empty);
+    assert.deepEqual(filtered, []);
+    assert.notEqual(filtered, empty);
+    assert.deepEqual(sortEvents(empty), []);
+  });
+
   it('summarises price and seats across tiers', () => {
     const summit = summaries.find((e) => e.title === 'Tech Summit');
     assert.equal(summit.minPriceCents, 10000);
@@ -78,8 +100,33 @@ describe('event search', () => {
     });
 
     it('rejects nonsense input', () => {
-      assert.throws(() => filterEvents(summaries, { from: 'yesterday-ish' }), DomainError);
-      assert.throws(() => filterEvents(summaries, { maxPriceCents: -5 }), DomainError);
+      for (const action of [
+        () => filterEvents(summaries, { from: 'yesterday-ish' }),
+        () => filterEvents(summaries, { from: '2026-02-31' }),
+        () => filterEvents(summaries, { maxPriceCents: -5 }),
+        () => filterEvents(summaries, { maxPriceCents: 1.5 }),
+        () => filterEvents(summaries, { q: 42 }),
+      ]) {
+        assert.throws(action, (error) => error instanceof DomainError && error.code === 'VALIDATION');
+      }
+    });
+
+    it('returns a new filtered list without changing the original', () => {
+      const original = [...summaries];
+      const result = filterEvents(summaries, { city: 'lagos' });
+      assert.deepEqual(summaries, original);
+      assert.notEqual(result, summaries);
+    });
+
+    it('excludes events without tiers from a price filter', () => {
+      const noTier = { id: 'no-tier', title: 'No Tier', city: 'Lagos', venue: '', startsAt: '2026-12-05T00:00:00Z', minPriceCents: null, seatsLeft: 0 };
+      assert.deepEqual(titles(filterEvents([...summaries, noTier], { maxPriceCents: 10000 })), [
+        'Jazz Night',
+        'Tech Summit',
+        'Food Fair',
+        'Sold Out Gig',
+      ]);
+      assert.ok(!titles(filterEvents([...summaries, noTier], { maxPriceCents: 10000 })).includes('No Tier'));
     });
   });
 
@@ -105,7 +152,19 @@ describe('event search', () => {
       const before = titles(summaries);
       sortEvents(summaries, 'price');
       assert.deepEqual(titles(summaries), before);
-      assert.throws(() => sortEvents(summaries, 'constructor'), DomainError);
+      assert.throws(
+        () => sortEvents(summaries, 'constructor'),
+        (error) => error instanceof DomainError && error.code === 'VALIDATION',
+      );
+    });
+
+    it('uses title then id to break equal-date ties', () => {
+      const sameDate = [
+        { id: 'z', title: 'Bravo', startsAt: '2026-12-05T12:00:00Z' },
+        { id: 'b', title: 'Alpha', startsAt: '2026-12-05T12:00:00Z' },
+        { id: 'a', title: 'Alpha', startsAt: '2026-12-05T12:00:00Z' },
+      ];
+      assert.deepEqual(sortEvents(sameDate, 'date').map((event) => event.id), ['a', 'b', 'z']);
     });
   });
 

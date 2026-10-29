@@ -5,6 +5,8 @@ import {
   createEvent,
   addTier,
   publishEvent,
+  unpublishEvent,
+  listEventSummaries,
   bookTickets,
   cancelBooking,
   joinWaitlist,
@@ -39,16 +41,56 @@ describe('inventory', () => {
     });
 
     it('rejects a missing title, a bad date and bad numbers', () => {
+      const sizeBefore = store.events.size;
       throwsCode(() => createEvent(store, { title: ' ', city: 'x', startsAt: '2026-12-05' }), 'VALIDATION');
       throwsCode(() => createEvent(store, { title: 'x', city: 'x', startsAt: 'nope' }), 'VALIDATION');
+      throwsCode(() => createEvent(store, { title: 'x', city: 'x', venue: 42, startsAt: '2026-12-05' }), 'VALIDATION');
+      throwsCode(() => createEvent(store, null), 'VALIDATION');
+      assert.equal(store.events.size, sizeBefore);
       throwsCode(() => addTier(store, event.id, { name: 'x', priceCents: 19.99, capacity: 5 }), 'VALIDATION');
       throwsCode(() => addTier(store, event.id, { name: 'x', priceCents: 100, capacity: 0 }), 'VALIDATION');
+      throwsCode(() => addTier(store, event.id, null), 'VALIDATION');
     });
 
     it('cannot publish an event with no tiers', () => {
       const empty = createEvent(store, { title: 'Empty', city: 'Abuja', startsAt: '2026-12-06' });
       throwsCode(() => publishEvent(store, empty.id), 'INVALID_STATE');
       assert.equal(publishEvent(store, event.id).status, 'published');
+    });
+
+    it('publishes a draft and makes it visible in the public event list', () => {
+      assert.equal(listEventSummaries(store).some((summary) => summary.id === event.id), false);
+      const published = publishEvent(store, event.id);
+      assert.equal(published.status, 'published');
+      assert.equal(listEventSummaries(store).some((summary) => summary.id === event.id), true);
+    });
+
+    it('rejects publishing an event that is already published', () => {
+      publishEvent(store, event.id);
+      throwsCode(() => publishEvent(store, event.id), 'INVALID_STATE');
+    });
+
+    it('unpublishes a published event and hides it from the public list', () => {
+      publishEvent(store, event.id);
+      const unpublished = unpublishEvent(store, event.id);
+      assert.equal(unpublished.status, 'draft');
+      assert.equal(listEventSummaries(store).some((summary) => summary.id === event.id), false);
+      assert.equal(listEventSummaries(store, { publishedOnly: false }).some((summary) => summary.id === event.id), true);
+    });
+
+    it('rejects unpublishing an event that is still a draft', () => {
+      throwsCode(() => unpublishEvent(store, event.id), 'INVALID_STATE');
+      assert.equal(event.status, 'draft');
+    });
+
+    it('rejects adding a tier to a missing event', () => {
+      throwsCode(() => addTier(store, 'missing-event', { name: 'GA', priceCents: 100, capacity: 1 }), 'NOT_FOUND');
+    });
+
+    it('adds an unsold tier with the expected capacity and seats remaining', () => {
+      assert.equal(tier.sold, 0);
+      assert.equal(tier.capacity, 3);
+      assert.equal(seatsLeft(tier), 3);
     });
   });
 
@@ -62,8 +104,20 @@ describe('inventory', () => {
 
     it('rejects a booking bigger than the seats left, and changes nothing', () => {
       bookTickets(store, tier.id, 'ada', 2);
+      const bookingCount = store.bookings.size;
+      const references = store.bookingsByReference.size;
       throwsCode(() => bookTickets(store, tier.id, 'bayo', 2), 'SOLD_OUT');
       assert.equal(seatsLeft(tier), 1);
+      assert.equal(store.bookings.size, bookingCount);
+      assert.equal(store.bookingsByReference.size, references);
+    });
+
+    it('validates the user and keeps booking amounts within safe whole cents', () => {
+      throwsCode(() => bookTickets(store, tier.id, ' ', 1), 'VALIDATION');
+      tier.priceCents = Number.MAX_SAFE_INTEGER;
+      throwsCode(() => bookTickets(store, tier.id, 'ada', 2), 'VALIDATION');
+      assert.equal(seatsLeft(tier), 3);
+      assert.equal(store.bookings.size, 0);
     });
 
     it('lets the last ticket be booked, then reports sold out', () => {

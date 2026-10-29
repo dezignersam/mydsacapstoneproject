@@ -20,21 +20,49 @@ export function summarizeEvent(event, tiers) {
 }
 
 function parseDate(value, field, { endOfDay = false } = {}) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new DomainError('VALIDATION', `${field} must be a valid ISO date`);
+  }
   const time = new Date(value).getTime();
   if (Number.isNaN(time)) throw new DomainError('VALIDATION', `${field} must be a valid date`);
   // "2026-12-05" as an upper bound should include the whole of the 5th.
-  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+  const datePart = value.slice(0, 10);
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const datePartTime = new Date(`${datePart}T00:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(value) ||
+    Number.isNaN(datePartTime.getTime()) ||
+    datePartTime.toISOString().slice(0, 10) !== datePart
+  ) {
+    throw new DomainError('VALIDATION', `${field} must be a valid ISO date`);
+  }
   return endOfDay && isDateOnly ? time + 24 * 60 * 60 * 1000 - 1 : time;
 }
 
-export function filterEvents(summaries, { q, city, from, to, maxPriceCents, onlyAvailable } = {}) {
+export function filterEvents(summaries, criteria = {}) {
+  if (!Array.isArray(summaries)) {
+    throw new DomainError('VALIDATION', 'summaries must be an array');
+  }
+  if (!criteria || typeof criteria !== 'object' || Array.isArray(criteria)) {
+    throw new DomainError('VALIDATION', 'criteria must be an object');
+  }
+  const { q, city, from, to, maxPriceCents, onlyAvailable } = criteria;
+  if (q !== undefined && typeof q !== 'string') {
+    throw new DomainError('VALIDATION', 'q must be a string');
+  }
+  if (city !== undefined && typeof city !== 'string') {
+    throw new DomainError('VALIDATION', 'city must be a string');
+  }
   const text = q?.trim().toLowerCase();
   const wantedCity = city?.trim().toLowerCase();
-  const fromTime = from ? parseDate(from, 'from') : undefined;
-  const toTime = to ? parseDate(to, 'to', { endOfDay: true }) : undefined;
+  const fromTime = from === undefined ? undefined : parseDate(from, 'from');
+  const toTime = to === undefined ? undefined : parseDate(to, 'to', { endOfDay: true });
 
-  if (maxPriceCents !== undefined && (!Number.isInteger(maxPriceCents) || maxPriceCents < 0)) {
+  if (maxPriceCents !== undefined && (!Number.isSafeInteger(maxPriceCents) || maxPriceCents < 0)) {
     throw new DomainError('VALIDATION', 'maxPriceCents must be a whole number of cents');
+  }
+  if (onlyAvailable !== undefined && typeof onlyAvailable !== 'boolean') {
+    throw new DomainError('VALIDATION', 'onlyAvailable must be a boolean');
   }
 
   return summaries.filter((event) => {
